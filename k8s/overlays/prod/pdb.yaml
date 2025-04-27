@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prod-sequential-questioning-pdb
+  namespace: sequential-questioning
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: sequential-questioning
+      environment: prod 

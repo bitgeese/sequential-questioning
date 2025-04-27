@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sequential-questioning
+spec:
+  template:
+    spec:
+      containers:
+      - name: sequential-questioning
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+        env:
+        - name: DEBUG
+          value: "false" 

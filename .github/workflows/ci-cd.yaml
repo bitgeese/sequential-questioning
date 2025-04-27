@@ -1,0 +1,203 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+
+env:
+  PYTHON_VERSION: '3.10'
+  DOCKER_REGISTRY: ghcr.io
+  DOCKER_IMAGE_NAME: ${{ github.repository_owner }}/sequential-questioning
+  K8S_DEV_CONTEXT: dev-cluster
+  K8S_STAGING_CONTEXT: staging-cluster
+  K8S_PROD_CONTEXT: prod-cluster
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+          - 6334:6334
+        options: >-
+          --health-cmd "curl --fail http://localhost:6333/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+          
+      - name: Run linters
+        run: |
+          ruff check .
+          isort --check-only --profile black app tests
+          black --check app tests
+          mypy app
+          
+      - name: Run tests
+        run: |
+          pytest -v tests/
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          QDRANT_URL: http://localhost:6333
+
+  build:
+    name: Build and Push Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event_name == 'release' }}
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-dev:
+    name: Deploy to Development
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        
+      - name: Install Kustomize
+        uses: imranismail/setup-kustomize@v2
+        
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_DEV }}
+          context: ${{ env.K8S_DEV_CONTEXT }}
+          
+      - name: Deploy to Development
+        run: |
+          cd k8s/overlays/dev
+          kustomize edit set image ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:sha-${{ github.sha }}
+          kubectl apply -k .
+          
+      - name: Verify Deployment
+        run: |
+          kubectl rollout status deployment/dev-sequential-questioning -n sequential-questioning
+  
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        
+      - name: Install Kustomize
+        uses: imranismail/setup-kustomize@v2
+        
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_STAGING }}
+          context: ${{ env.K8S_STAGING_CONTEXT }}
+          
+      - name: Deploy to Staging
+        run: |
+          cd k8s/overlays/staging
+          kustomize edit set image ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:sha-${{ github.sha }}
+          kubectl apply -k .
+          
+      - name: Verify Deployment
+        run: |
+          kubectl rollout status deployment/staging-sequential-questioning -n sequential-questioning
+
+  deploy-prod:
+    name: Deploy to Production
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        
+      - name: Install Kustomize
+        uses: imranismail/setup-kustomize@v2
+        
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBECONFIG_PROD }}
+          context: ${{ env.K8S_PROD_CONTEXT }}
+          
+      - name: Deploy to Production
+        run: |
+          cd k8s/overlays/prod
+          kustomize edit set image ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.event.release.tag_name }}
+          kubectl apply -k .
+          
+      - name: Verify Deployment
+        run: |
+          kubectl rollout status deployment/prod-sequential-questioning -n sequential-questioning 
