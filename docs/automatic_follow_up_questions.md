@@ -16,7 +16,7 @@ These endpoints allow for different levels of automation in the question generat
 
 | Feature | Basic Question | Follow-Up Question | Automatic Multi-Round |
 | --- | --- | --- | --- |
-| Operation ID | `sequentialQuestioning` | `sequentialQuestioningFollowUp` | `sequentialQuestioningAutomatic` |
+| Operation ID | `sequential_questioning` | `sequential_questioning_follow_up` | `sequential_questioning_automatic` |
 | Designed for | Initial questions | Explicit follow-up questions | Complete conversation flows |
 | Requires conversation_id | No | Yes | No |
 | Max question rounds | 1 | 1 | Configurable (1-3) |

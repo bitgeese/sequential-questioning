@@ -37,7 +37,7 @@ class AutomaticQuestioningResponse(BaseModel):
 @router.post(
     "/question", 
     response_model=QuestionResponse,
-    operation_id="sequentialQuestioning",
+    operation_id="sequential_questioning",
     summary="Generate a batch of sequential questions based on conversation context",
     description="This MCP endpoint generates multiple contextual, sequential questions based on conversation history and context, presented in a numbered list format.",
     tags=["mcp"]
@@ -109,7 +109,7 @@ async def generate_sequential_question(
 @router.post(
     "/question/follow-up", 
     response_model=QuestionResponse,
-    operation_id="sequentialQuestioningFollowUp",
+    operation_id="sequential_questioning_follow_up",
     summary="Generate follow-up questions based on user's answers to previous questions",
     description="This MCP endpoint generates follow-up questions based on the user's answers to previous questions, maintaining the conversation context.",
     tags=["mcp"]
@@ -185,7 +185,7 @@ async def generate_follow_up_questions(
 @router.post(
     "/question/automatic",
     response_model=AutomaticQuestioningResponse,
-    operation_id="sequentialQuestioningAutomatic",
+    operation_id="sequential_questioning_automatic",
     summary="Generate questions and automatic follow-ups based on user answers",
     description="This MCP endpoint provides a complete question flow, starting with initial questions and automatically generating follow-up questions based on user responses.",
     tags=["mcp"]
