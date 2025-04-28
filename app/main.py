@@ -31,6 +31,11 @@ def create_app() -> FastAPI:
         app,
         name=f"{settings.APP_NAME} MCP",
         include_tags=["mcp"],  # Only expose endpoints with the 'mcp' tag
+        include_operations=[
+            "sequential_questioning",
+            "sequential_questioning_follow_up",
+            "sequential_questioning_automatic"
+        ]  # Use only operation IDs for tool names, avoiding hyphens
     )
     
     # Mount MCP server

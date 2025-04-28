@@ -147,13 +147,23 @@ class QuestionGenerationService:
         Returns:
             Generated question response with metadata and a batch of questions
         """
+        # Log the incoming request parameters
+        app_logger.info(f"Processing question generation request with conversation_id: {request.conversation_id}, user_id: {request.user_id}")
+        
         # Get or create user session
         session_id, session = await self._get_or_create_session(db, request.user_id, request.context)
+        app_logger.info(f"Using session_id: {session_id}")
         
         # Get or create conversation
         conversation_id, conversation = await self._get_or_create_conversation(
             db, session_id, request.conversation_id, request.context
         )
+        
+        # Log whether we're using an existing conversation or created a new one
+        if request.conversation_id == conversation_id:
+            app_logger.info(f"Using existing conversation with ID: {conversation_id}")
+        else:
+            app_logger.info(f"Created or found different conversation with ID: {conversation_id}, replacing requested ID: {request.conversation_id}")
         
         # Process previous messages and context
         previous_messages_formatted, has_previous_messages = self._format_previous_messages(
@@ -228,30 +238,30 @@ class QuestionGenerationService:
             )
             
             question_msg = await self.message_repository.create(db, obj_in=message_data)
-            
-            # Store question text in vector database for future context
-            await vector_db_service.store_embedding(
-                text=q["question_text"],
+        
+        # Store question text in vector database for future context
+        await vector_db_service.store_embedding(
+            text=q["question_text"],
+            metadata={
+                "content": q["question_text"],
+                "type": "question",
+                "question_number": q["question_number"],
+                "conversation_id": conversation_id,
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+        question_items.append(
+            QuestionItem(
+                question_text=q["question_text"],
+                question_number=q["question_number"],
                 metadata={
-                    "content": q["question_text"],
-                    "type": "question",
-                    "question_number": q["question_number"],
-                    "conversation_id": conversation_id,
-                    "session_id": session_id,
-                    "timestamp": datetime.now().isoformat()
+                    "importance": q.get("importance_explanation", ""),
+                    "information_to_look_for": q.get("information_to_look_for", "")
                 }
             )
-            
-            question_items.append(
-                QuestionItem(
-                    question_text=q["question_text"],
-                    question_number=q["question_number"],
-                    metadata={
-                        "importance": q.get("importance_explanation", ""),
-                        "information_to_look_for": q.get("information_to_look_for", "")
-                    }
-                )
-            )
+        )
         
         # Get the current question (first question in the batch)
         current_question = questions_batch[0]["question_text"]
@@ -307,20 +317,33 @@ class QuestionGenerationService:
     ) -> Tuple[str, Any]:
         """Get existing conversation or create a new one."""
         conversation = None
-        if conversation_id:
-            conversation = await self.conversation_repository.get(db, id=conversation_id)
         
+        # If conversation_id is provided, try to get it
+        if conversation_id:
+            app_logger.info(f"Attempting to retrieve conversation with ID: {conversation_id}")
+            conversation = await self.conversation_repository.get(db, id=conversation_id)
+            if conversation:
+                app_logger.info(f"Successfully retrieved conversation with ID: {conversation_id}")
+            else:
+                app_logger.warning(f"Provided conversation_id {conversation_id} was not found. Creating a new conversation.")
+        
+        # If no valid conversation yet, try to get active conversation for session
         if not conversation:
-            # Try to get active conversation for this session
+            app_logger.info(f"Trying to find active conversation for session ID: {session_id}")
             conversation = await self.conversation_repository.get_active_by_user_session_id(
                 db, user_session_id=session_id
             )
-            
+            if conversation:
+                app_logger.info(f"Found active conversation with ID: {conversation.id} for session")
+        
+        # If still no conversation, create a new one
         if not conversation:
             # Create new conversation
+            topic = context[:50] if context else "New conversation"
+            app_logger.info(f"Creating new conversation with topic: {topic}")
             conversation_data = ConversationCreate(
                 user_session_id=session_id,
-                topic=context[:50] if context else "New conversation",
+                topic=topic,
                 is_active=True
             )
             conversation = await self.conversation_repository.create(db, obj_in=conversation_data)

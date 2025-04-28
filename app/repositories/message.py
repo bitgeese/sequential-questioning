@@ -47,7 +47,7 @@ class MessageRepository(BaseRepository[Message, MessageCreate, MessageUpdate]):
         latest_message = await self.get_latest_message(db=db, conversation_id=conversation_id)
         if latest_message:
             return latest_message.sequence_number + 1
-        return 1
+        return 1 
         
     async def count_by_conversation(
         self, db: AsyncSession, *, conversation_id: str, message_type: Optional[str] = None

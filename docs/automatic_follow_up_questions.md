@@ -18,8 +18,20 @@ These endpoints allow for different levels of automation in the question generat
 | --- | --- | --- | --- |
 | Operation ID | `sequential_questioning` | `sequential_questioning_follow_up` | `sequential_questioning_automatic` |
 | Designed for | Initial questions | Explicit follow-up questions | Complete conversation flows |
-| Requires conversation_id | No | Yes | No |
+| Requires conversation_id | No | No (recommended but optional) | No |
 | Max question rounds | 1 | 1 | Configurable (1-3) |
+
+### Follow-Up Question Generation
+
+The follow-up question endpoint is now more flexible for use as an LLM tool. When a follow-up question is requested:
+
+1. If a `conversation_id` is provided, it will use that existing conversation
+2. If no `conversation_id` is provided but `previous_messages` are included, it will:
+   - Create a new conversation automatically
+   - Return the new `conversation_id` in the response
+   - Generate appropriate follow-up questions based on the previous messages
+
+This makes it easier for LLMs to use the follow-up endpoint without having to explicitly track conversation IDs.
 
 ## Automatic Multi-Round Questioning
 
@@ -147,6 +159,40 @@ def sequential_questioning_tool(context, user_id=None, conversation_id=None, pre
     return data["all_questions_combined"]
 ```
 
+## Using Follow-Up Questions in LLM Tools
+
+When integrating the follow-up endpoint as an LLM tool, you can now use it without requiring explicit conversation tracking:
+
+```python
+def follow_up_question_tool(context, previous_messages, conversation_id=None):
+    """
+    Tool for generating follow-up questions based on previous messages.
+    
+    Args:
+        context: Conversational context
+        previous_messages: List of previous messages containing user answers
+        conversation_id: Optional conversation identifier (will be created if not provided)
+        
+    Returns:
+        A formatted list of follow-up questions
+    """
+    url = "http://localhost:8000/mcp-internal/question/follow-up"
+    
+    payload = {
+        "context": context,
+        "previous_messages": previous_messages,
+        "conversation_id": conversation_id
+    }
+    
+    response = requests.post(url, json=payload)
+    response.raise_for_status()
+    
+    data = response.json()
+    # Store the conversation_id for future calls if needed
+    conversation_id = data["conversation_id"]
+    return data["current_question"]
+```
+
 ## Best Practices
 
 1. **Balance Depth vs. Length** - While more rounds provide more comprehensive questioning, they can also lead to lengthy exchanges. Consider your user experience when setting `max_rounds`.
@@ -157,4 +203,6 @@ def sequential_questioning_tool(context, user_id=None, conversation_id=None, pre
 
 4. **Handle Long Responses** - When presenting multiple questions to users, ensure your UI can handle potentially lengthy responses.
 
-5. **Conversation Continuity** - Store the `conversation_id` and `session_id` from responses to maintain conversation context for future interactions. 
+5. **Conversation Continuity** - Store the `conversation_id` and `session_id` from responses to maintain conversation context for future interactions. While the follow-up endpoint can now work without a conversation_id, providing one when available will result in better context management.
+
+6. **LLM Integration** - When integrating with LLMs, focus on providing rich context and previous messages. The endpoints are now designed to handle conversation tracking automatically if needed. 
